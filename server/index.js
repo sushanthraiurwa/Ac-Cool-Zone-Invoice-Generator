@@ -8,6 +8,15 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
+const cors = require('cors');
+
+app.use(cors({
+  origin: 'https://ac-cool-zone-invoice-generator.vercel.app', // your frontend
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type']
+}));
+
+
 // Generate the invoice HTML using a template literal
 function generateHTML(invoiceData) {
   // Expect invoiceData to have: customerName, date, items (array), total, amountWords
