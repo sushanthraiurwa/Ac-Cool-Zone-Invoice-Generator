@@ -1,0 +1,166 @@
+// server/index.js
+const express = require('express');
+const bodyParser = require('body-parser');
+const puppeteer = require('puppeteer');
+const cors = require('cors');
+
+const app = express();
+app.use(cors());
+app.use(bodyParser.json());
+
+// Generate the invoice HTML using a template literal
+function generateHTML(invoiceData) {
+  // Expect invoiceData to have: customerName, date, items (array), total, amountWords
+  return `
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>AS COOL ZONE Invoice</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f9f9f9;
+        padding: 20px;
+        margin: 0;
+      }
+      .container {
+        max-width: 900px;
+        margin: auto;
+        background: #fff;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      }
+      h1, h2 {
+        text-align: center;
+        margin: 0;
+      }
+      .address {
+        text-align: center;
+        color: #555;
+        margin-bottom: 20px;
+      }
+      .inputs {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        margin-bottom: 20px;
+      }
+      .inputs div {
+        flex: 1;
+        margin: 5px;
+        min-width: 250px;
+      }
+      .inputs label {
+        font-weight: bold;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 20px;
+      }
+      th, td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: center;
+      }
+      .total-row {
+        font-weight: bold;
+      }
+      .footer {
+        margin-top: 30px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container" id="invoice">
+      <h1>AS COOL ZONE</h1>
+      <h2>All Types of AC Works | Mobile: 6364045936</h2>
+      <p class="address">Urwa Marigudi, Mangalore - 575006</p>
+
+      <div class="inputs">
+        <div>
+          <label>Customer Name:</label> ${invoiceData.customerName || ''}
+        </div>
+        <div>
+          <label>Date:</label> ${invoiceData.date || ''}
+        </div>
+      </div>
+
+      <table id="invoiceTable">
+        <thead>
+          <tr>
+            <th>S.No.</th>
+            <th>Description</th>
+            <th>Qty</th>
+            <th>Rate</th>
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${invoiceData.items
+            .map(
+              (item, index) => `
+            <tr>
+              <td>${index + 1}</td>
+              <td>${item.description}</td>
+              <td>${item.qty}</td>
+              <td>${item.rate}</td>
+              <td>${(item.qty * item.rate).toFixed(2)}</td>
+            </tr>
+          `
+            )
+            .join('')}
+        </tbody>
+        <tfoot>
+          <tr class="total-row">
+            <td colspan="4">Total</td>
+            <td>${invoiceData.total.toFixed(2)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div class="footer">
+        <p><strong>Rupees in words:</strong> ${invoiceData.amountWords || ''} Only</p>
+        <p><strong>Signature:</strong> ____________________________</p>
+      </div>
+    </div>
+  </body>
+  </html>
+  `;
+}
+
+// Endpoint to generate PDF
+app.post('/generate-pdf', async (req, res) => {
+  try {
+    const invoiceData = req.body;
+    const html = generateHTML(invoiceData);
+
+    // Launch Puppeteer (use no-sandbox for many production environments)
+    const browser = await puppeteer.launch({
+      args: ['--no-sandbox']
+    });
+    const page = await browser.newPage();
+
+    // Set the HTML content and wait for network idle so images/fonts load if any
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+
+    // Generate the PDF with Puppeteer
+    const pdfBuffer = await page.pdf({ format: 'Letter', printBackground: true });
+    await browser.close();
+
+    // Send the PDF back
+    res.contentType("application/pdf");
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Error generating PDF');
+  }
+});
+
+// Start the server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});

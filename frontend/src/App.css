@@ -1,0 +1,120 @@
+/* client/src/App.css */
+.App {
+  font-family: Arial, sans-serif;
+  background: #f9f9f9;
+  padding: 20px;
+  margin: 0;
+}
+
+.container {
+  max-width: 900px;
+  margin: auto;
+  background: #fff;
+  padding: 30px;
+  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+h1, h2 {
+  text-align: center;
+  margin: 0;
+}
+
+.address {
+  text-align: center;
+  color: #555;
+  margin-bottom: 20px;
+}
+
+.inputs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.inputs div {
+  flex: 1;
+  margin: 5px;
+  min-width: 250px;
+}
+
+.inputs label {
+  font-weight: bold;
+}
+
+input[type="text"],
+input[type="date"],
+input[type="number"] {
+  padding: 6px;
+  margin-left: 10px;
+  width: 200px;
+  box-sizing: border-box;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+th, td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: center;
+}
+
+.total-row {
+  font-weight: bold;
+}
+
+.footer {
+  margin-top: 30px;
+}
+
+.btn {
+  display: block;
+  margin: 20px auto;
+  padding: 10px 20px;
+  background: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: #0056b3;
+}
+
+.add-btn {
+  background: #28a745;
+  margin-top: 10px;
+}
+
+.add-btn:hover {
+  background: #1e7e34;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  input[type="text"],
+  input[type="date"],
+  input[type="number"] {
+    width: 100%;
+    margin-top: 5px;
+  }
+
+
+  
+
+  .inputs div {
+    min-width: 100%;
+  }
+  table, th, td {
+    font-size: 14px;
+  }
+}
