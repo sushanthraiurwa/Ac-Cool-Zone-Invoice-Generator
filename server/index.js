@@ -1,3 +1,4 @@
+// index.js
 const express = require('express');
 const bodyParser = require('body-parser');
 const puppeteer = require('puppeteer');
@@ -5,15 +6,13 @@ const cors = require('cors');
 
 const app = express();
 
-// CORS config
 app.use(cors({
   origin: 'https://ac-cool-zone-invoice-generator.vercel.app',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type']
 }));
 
-app.options('*', cors()); // enable CORS preflight
-
+app.options('*', cors());
 app.use(bodyParser.json());
 
 // Generate invoice HTML
