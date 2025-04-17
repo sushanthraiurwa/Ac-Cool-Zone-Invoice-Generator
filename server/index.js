@@ -1,11 +1,20 @@
-// index.js
 const express = require('express');
 const bodyParser = require('body-parser');
 const puppeteer = require('puppeteer');
 const cors = require('cors');
 
+// Error handling at process level
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Rejection:', err);
+});
+
 const app = express();
 
+// CORS configuration
 app.use(cors({
   origin: 'https://ac-cool-zone-invoice-generator.vercel.app',
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -15,8 +24,23 @@ app.use(cors({
 app.options('*', cors());
 app.use(bodyParser.json());
 
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`Incoming request: ${req.method} ${req.path}`);
+  next();
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK', timestamp: new Date() });
+});
+
 // Generate invoice HTML
 function generateHTML(invoiceData) {
+  if (!invoiceData || !invoiceData.items) {
+    throw new Error('Invalid invoice data');
+  }
+
   return `
   <!DOCTYPE html>
   <html lang="en">
@@ -110,10 +134,10 @@ function generateHTML(invoiceData) {
               (item, index) => `
             <tr>
               <td>${index + 1}</td>
-              <td>${item.description}</td>
-              <td>${item.qty}</td>
-              <td>${item.rate}</td>
-              <td>${(item.qty * item.rate).toFixed(2)}</td>
+              <td>${item.description || ''}</td>
+              <td>${item.qty || 0}</td>
+              <td>${item.rate || 0}</td>
+              <td>${((item.qty || 0) * (item.rate || 0)).toFixed(2)}</td>
             </tr>
           `
             )
@@ -122,7 +146,7 @@ function generateHTML(invoiceData) {
         <tfoot>
           <tr class="total-row">
             <td colspan="4">Total</td>
-            <td>${invoiceData.total.toFixed(2)}</td>
+            <td>${invoiceData.total?.toFixed(2) || '0.00'}</td>
           </tr>
         </tfoot>
       </table>
@@ -141,26 +165,58 @@ function generateHTML(invoiceData) {
 app.post('/generate-pdf', async (req, res) => {
   try {
     const invoiceData = req.body;
+    
+    if (!invoiceData || !invoiceData.items || !Array.isArray(invoiceData.items)) {
+      return res.status(400).json({ error: 'Invalid invoice data format' });
+    }
+
     const html = generateHTML(invoiceData);
 
     const browser = await puppeteer.launch({
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      headless: true,
-      executablePath: puppeteer.executablePath()
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--single-process'
+      ],
+      headless: 'new',
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath()
     });
 
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
 
-    const pdfBuffer = await page.pdf({ format: 'Letter', printBackground: true });
+    const pdfBuffer = await page.pdf({ 
+      format: 'A4',
+      printBackground: true,
+      margin: {
+        top: '20px',
+        bottom: '20px',
+        left: '20px',
+        right: '20px'
+      }
+    });
+    
     await browser.close();
 
-    res.contentType("application/pdf");
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename=invoice.pdf');
     res.send(pdfBuffer);
   } catch (err) {
-    console.error(err);
-    res.status(500).send('Error generating PDF');
+    console.error('PDF generation error:', err);
+    res.status(500).json({ error: 'Error generating PDF', details: err.message });
   }
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 module.exports = app;
