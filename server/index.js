@@ -177,10 +177,13 @@ app.post('/generate-pdf', async (req, res) => {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--single-process'
+        '--single-process',
+        '--no-zygote'
       ],
       headless: 'new',
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath()
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || 
+                    '/usr/bin/chromium-browser' || 
+                    puppeteer.executablePath()
     });
 
     const page = await browser.newPage();
