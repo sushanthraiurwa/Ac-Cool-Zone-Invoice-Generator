@@ -5,18 +5,36 @@ const cors = require('cors');
 
 const app = express();
 
-// Middleware Configuration
-app.use(cors({
+// Enhanced CORS configuration
+const corsOptions = {
   origin: 'https://ac-cool-zone-invoice-generator.vercel.app',
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 204
+};
 
+app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
+
+// Body parser configuration
 app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', chromium: process.env.CHROMIUM_PATH || 'puppeteer' });
+  res.status(200).json({ 
+    status: 'OK',
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
 // Generate invoice HTML
@@ -175,16 +193,25 @@ function numberToWords(num) {
 app.post('/generate-pdf', async (req, res) => {
   let browser;
   try {
+    // Validate request
+    if (!req.headers['content-type']?.includes('application/json')) {
+      return res.status(400).json({ error: 'Content-Type must be application/json' });
+    }
+
     const invoiceData = req.body;
     
     if (!invoiceData?.items || !Array.isArray(invoiceData.items)) {
-      return res.status(400).json({ error: 'Invalid invoice data format' });
+      return res.status(400).json({ 
+        error: 'Invalid request',
+        message: 'Items array is required',
+        received: invoiceData
+      });
     }
 
     const html = generateHTML(invoiceData);
 
-    // Use @sparticuz/chromium-min for Render.com
-    let launchOptions = {
+    // Puppeteer configuration with fallbacks
+    const launchOptions = {
       headless: 'new',
       args: [
         '--no-sandbox',
@@ -192,25 +219,20 @@ app.post('/generate-pdf', async (req, res) => {
         '--disable-dev-shm-usage',
         '--single-process'
       ],
-      timeout: 30000
+      timeout: 30000,
+      executablePath: process.env.CHROMIUM_PATH || 
+                     '/usr/bin/chromium-browser' || 
+                     puppeteer.executablePath()
     };
-
-    if (process.env.RENDER) {
-      // Use Chromium-min package for Render
-      const chromium = require('@sparticuz/chromium-min');
-      launchOptions = {
-        ...launchOptions,
-        args: chromium.args,
-        executablePath: await chromium.executablePath(),
-        defaultViewport: chromium.defaultViewport
-      };
-    }
 
     console.log('Launching browser with options:', launchOptions);
     browser = await puppeteer.launch(launchOptions);
     
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+    await page.setContent(html, { 
+      waitUntil: 'networkidle0',
+      timeout: 30000
+    });
 
     const pdfBuffer = await page.pdf({
       format: 'A4',
@@ -220,26 +242,34 @@ app.post('/generate-pdf', async (req, res) => {
 
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': 'inline; filename="invoice.pdf"'
+      'Content-Disposition': 'inline; filename="invoice.pdf"',
+      'Cache-Control': 'no-cache'
     });
     res.send(pdfBuffer);
 
   } catch (error) {
     console.error('PDF Generation Error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'PDF generation failed',
       message: error.message,
-      platform: process.platform,
-      render: !!process.env.RENDER
+      solution: 'Check server logs for details',
+      timestamp: new Date().toISOString()
     });
   } finally {
-    if (browser) await browser.close().catch(console.error);
+    if (browser) {
+      await browser.close()
+        .catch(err => console.error('Error closing browser:', err));
+    }
   }
 });
 
 // 404 Handler
 app.use((req, res) => {
-  res.status(404).json({ error: 'Not Found' });
+  res.status(404).json({ 
+    error: 'Not Found',
+    path: req.path,
+    method: req.method
+  });
 });
 
 // Error Handler
@@ -247,7 +277,8 @@ app.use((err, req, res, next) => {
   console.error('Server Error:', err);
   res.status(500).json({ 
     error: 'Internal Server Error',
-    message: err.message
+    message: err.message,
+    timestamp: new Date().toISOString()
   });
 });
 
