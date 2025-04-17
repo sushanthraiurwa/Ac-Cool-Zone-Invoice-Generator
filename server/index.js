@@ -139,9 +139,11 @@ app.post('/generate-pdf', async (req, res) => {
 
     // Launch Puppeteer (use no-sandbox for many production environments)
     const browser = await puppeteer.launch({
-      args: ['--no-sandbox']
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      headless: true,
+      executablePath: puppeteer.executablePath()
     });
-    const page = await browser.newPage();
+    
 
     // Set the HTML content and wait for network idle so images/fonts load if any
     await page.setContent(html, { waitUntil: 'networkidle0' });
