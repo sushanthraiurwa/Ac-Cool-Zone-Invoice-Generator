@@ -1,25 +1,23 @@
-// server/index.js
 const express = require('express');
 const bodyParser = require('body-parser');
 const puppeteer = require('puppeteer');
 const cors = require('cors');
 
 const app = express();
-app.use(cors());
-app.use(bodyParser.json());
 
-const cors = require('cors');
-
+// CORS config
 app.use(cors({
-  origin: 'https://ac-cool-zone-invoice-generator.vercel.app', // your frontend
+  origin: 'https://ac-cool-zone-invoice-generator.vercel.app',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type']
 }));
 
+app.options('*', cors()); // enable CORS preflight
 
-// Generate the invoice HTML using a template literal
+app.use(bodyParser.json());
+
+// Generate invoice HTML
 function generateHTML(invoiceData) {
-  // Expect invoiceData to have: customerName, date, items (array), total, amountWords
   return `
   <!DOCTYPE html>
   <html lang="en">
@@ -146,22 +144,18 @@ app.post('/generate-pdf', async (req, res) => {
     const invoiceData = req.body;
     const html = generateHTML(invoiceData);
 
-    // Launch Puppeteer (use no-sandbox for many production environments)
     const browser = await puppeteer.launch({
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
       headless: true,
       executablePath: puppeteer.executablePath()
     });
-    
 
-    // Set the HTML content and wait for network idle so images/fonts load if any
+    const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
 
-    // Generate the PDF with Puppeteer
     const pdfBuffer = await page.pdf({ format: 'Letter', printBackground: true });
     await browser.close();
 
-    // Send the PDF back
     res.contentType("application/pdf");
     res.send(pdfBuffer);
   } catch (err) {
@@ -170,6 +164,4 @@ app.post('/generate-pdf', async (req, res) => {
   }
 });
 
-// Start the server
 module.exports = app;
-
