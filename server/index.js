@@ -3,17 +3,7 @@ const bodyParser = require('body-parser');
 const puppeteer = require('puppeteer');
 const cors = require('cors');
 
-// Initialize Express app
 const app = express();
-
-// Error handling at process level
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-});
-
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
-});
 
 // Middleware Configuration
 app.use(cors({
@@ -22,24 +12,11 @@ app.use(cors({
   allowedHeaders: ['Content-Type']
 }));
 
-app.options('*', cors());
 app.use(bodyParser.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-// Request logging middleware
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  next();
-});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    timestamp: new Date(),
-    environment: process.env.NODE_ENV || 'development',
-    render: !!process.env.RENDER
-  });
+  res.status(200).json({ status: 'OK', chromium: process.env.CHROMIUM_PATH || 'puppeteer' });
 });
 
 // Generate invoice HTML
@@ -200,18 +177,14 @@ app.post('/generate-pdf', async (req, res) => {
   try {
     const invoiceData = req.body;
     
-    // Validate input
-    if (!invoiceData || !invoiceData.items || !Array.isArray(invoiceData.items)) {
-      return res.status(400).json({ 
-        error: 'Invalid request',
-        message: 'Items array is required'
-      });
+    if (!invoiceData?.items || !Array.isArray(invoiceData.items)) {
+      return res.status(400).json({ error: 'Invalid invoice data format' });
     }
 
     const html = generateHTML(invoiceData);
 
-    // Puppeteer configuration for Render.com
-    const launchOptions = {
+    // Use @sparticuz/chromium-min for Render.com
+    let launchOptions = {
       headless: 'new',
       args: [
         '--no-sandbox',
@@ -219,55 +192,48 @@ app.post('/generate-pdf', async (req, res) => {
         '--disable-dev-shm-usage',
         '--single-process'
       ],
-      timeout: 30000 // 30 seconds timeout
+      timeout: 30000
     };
 
-    // Use Render.com's Chrome if available
     if (process.env.RENDER) {
-      launchOptions.executablePath = '/usr/bin/google-chrome-stable';
+      // Use Chromium-min package for Render
+      const chromium = require('@sparticuz/chromium-min');
+      launchOptions = {
+        ...launchOptions,
+        args: chromium.args,
+        executablePath: await chromium.executablePath(),
+        defaultViewport: chromium.defaultViewport
+      };
     }
 
     console.log('Launching browser with options:', launchOptions);
     browser = await puppeteer.launch(launchOptions);
     
     const page = await browser.newPage();
-    await page.setContent(html, { 
-      waitUntil: 'networkidle0',
-      timeout: 30000
-    });
+    await page.setContent(html, { waitUntil: 'networkidle0' });
 
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
-      margin: {
-        top: '20px',
-        bottom: '20px',
-        left: '20px',
-        right: '20px'
-      },
-      timeout: 30000
+      margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' }
     });
 
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': 'inline; filename="invoice.pdf"',
-      'Content-Length': pdfBuffer.length
+      'Content-Disposition': 'inline; filename="invoice.pdf"'
     });
     res.send(pdfBuffer);
 
   } catch (error) {
     console.error('PDF Generation Error:', error);
-    res.status(500).json({
+    res.status(500).json({ 
       error: 'PDF generation failed',
       message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      platform: process.platform,
+      render: !!process.env.RENDER
     });
   } finally {
-    if (browser) {
-      await browser.close().catch(err => {
-        console.error('Error closing browser:', err);
-      });
-    }
+    if (browser) await browser.close().catch(console.error);
   }
 });
 
