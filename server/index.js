@@ -3,6 +3,9 @@ const bodyParser = require('body-parser');
 const puppeteer = require('puppeteer');
 const cors = require('cors');
 
+// Initialize Express app
+const app = express();
+
 // Error handling at process level
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
@@ -12,9 +15,7 @@ process.on('unhandledRejection', (err) => {
   console.error('Unhandled Rejection:', err);
 });
 
-const app = express();
-
-// CORS configuration
+// Middleware Configuration
 app.use(cors({
   origin: 'https://ac-cool-zone-invoice-generator.vercel.app',
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -22,30 +23,42 @@ app.use(cors({
 }));
 
 app.options('*', cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`Incoming request: ${req.method} ${req.path}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', timestamp: new Date() });
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date(),
+    environment: process.env.NODE_ENV || 'development',
+    render: !!process.env.RENDER
+  });
 });
 
 // Generate invoice HTML
 function generateHTML(invoiceData) {
-  if (!invoiceData || !invoiceData.items) {
-    throw new Error('Invalid invoice data');
+  if (!invoiceData || !invoiceData.items || !Array.isArray(invoiceData.items)) {
+    throw new Error('Invalid invoice data structure');
   }
+
+  // Calculate total if not provided
+  const calculatedTotal = invoiceData.total || invoiceData.items.reduce((sum, item) => {
+    return sum + (item.qty || 0) * (item.rate || 0);
+  }, 0);
 
   return `
   <!DOCTYPE html>
   <html lang="en">
   <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AS COOL ZONE Invoice</title>
     <style>
       body {
@@ -101,6 +114,16 @@ function generateHTML(invoiceData) {
       .footer {
         margin-top: 30px;
       }
+      @media print {
+        body {
+          padding: 0;
+          background: white;
+        }
+        .container {
+          box-shadow: none;
+          padding: 10px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -114,7 +137,7 @@ function generateHTML(invoiceData) {
           <label>Customer Name:</label> ${invoiceData.customerName || ''}
         </div>
         <div>
-          <label>Date:</label> ${invoiceData.date || ''}
+          <label>Date:</label> ${invoiceData.date || new Date().toLocaleDateString()}
         </div>
       </div>
 
@@ -129,30 +152,26 @@ function generateHTML(invoiceData) {
           </tr>
         </thead>
         <tbody>
-          ${invoiceData.items
-            .map(
-              (item, index) => `
+          ${invoiceData.items.map((item, index) => `
             <tr>
               <td>${index + 1}</td>
               <td>${item.description || ''}</td>
               <td>${item.qty || 0}</td>
-              <td>${item.rate || 0}</td>
-              <td>${((item.qty || 0) * (item.rate || 0)).toFixed(2)}</td>
+              <td>₹${(item.rate || 0).toFixed(2)}</td>
+              <td>₹${((item.qty || 0) * (item.rate || 0)).toFixed(2)}</td>
             </tr>
-          `
-            )
-            .join('')}
+          `).join('')}
         </tbody>
         <tfoot>
           <tr class="total-row">
             <td colspan="4">Total</td>
-            <td>${invoiceData.total?.toFixed(2) || '0.00'}</td>
+            <td>₹${calculatedTotal.toFixed(2)}</td>
           </tr>
         </tfoot>
       </table>
 
       <div class="footer">
-        <p><strong>Rupees in words:</strong> ${invoiceData.amountWords || ''} Only</p>
+        <p><strong>Rupees in words:</strong> ${invoiceData.amountWords || numberToWords(calculatedTotal)} Only</p>
         <p><strong>Signature:</strong> ____________________________</p>
       </div>
     </div>
@@ -161,35 +180,63 @@ function generateHTML(invoiceData) {
   `;
 }
 
-// Endpoint to generate PDF
+// Helper function to convert numbers to words
+function numberToWords(num) {
+  // Simple implementation - replace with a full library if needed
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const teens = ['Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  
+  if (num === 0) return 'Zero';
+  if (num < 10) return ones[num];
+  if (num < 20) return teens[num - 10];
+  if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 !== 0 ? ' ' + ones[num % 10] : '');
+  return 'Rupees'; // Basic implementation - extend as needed
+}
+
+// PDF Generation Endpoint
 app.post('/generate-pdf', async (req, res) => {
+  let browser;
   try {
     const invoiceData = req.body;
     
+    // Validate input
     if (!invoiceData || !invoiceData.items || !Array.isArray(invoiceData.items)) {
-      return res.status(400).json({ error: 'Invalid invoice data format' });
+      return res.status(400).json({ 
+        error: 'Invalid request',
+        message: 'Items array is required'
+      });
     }
 
     const html = generateHTML(invoiceData);
 
-    const browser = await puppeteer.launch({
+    // Puppeteer configuration for Render.com
+    const launchOptions = {
+      headless: 'new',
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--single-process',
-        '--no-zygote'
+        '--single-process'
       ],
-      headless: 'new',
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || 
-                    '/usr/bin/chromium-browser' || 
-                    puppeteer.executablePath()
+      timeout: 30000 // 30 seconds timeout
+    };
+
+    // Use Render.com's Chrome if available
+    if (process.env.RENDER) {
+      launchOptions.executablePath = '/usr/bin/google-chrome-stable';
+    }
+
+    console.log('Launching browser with options:', launchOptions);
+    browser = await puppeteer.launch(launchOptions);
+    
+    const page = await browser.newPage();
+    await page.setContent(html, { 
+      waitUntil: 'networkidle0',
+      timeout: 30000
     });
 
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-
-    const pdfBuffer = await page.pdf({ 
+    const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
       margin: {
@@ -197,29 +244,45 @@ app.post('/generate-pdf', async (req, res) => {
         bottom: '20px',
         left: '20px',
         right: '20px'
-      }
+      },
+      timeout: 30000
     });
-    
-    await browser.close();
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename=invoice.pdf');
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'inline; filename="invoice.pdf"',
+      'Content-Length': pdfBuffer.length
+    });
     res.send(pdfBuffer);
-  } catch (err) {
-    console.error('PDF generation error:', err);
-    res.status(500).json({ error: 'Error generating PDF', details: err.message });
+
+  } catch (error) {
+    console.error('PDF Generation Error:', error);
+    res.status(500).json({
+      error: 'PDF generation failed',
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  } finally {
+    if (browser) {
+      await browser.close().catch(err => {
+        console.error('Error closing browser:', err);
+      });
+    }
   }
 });
 
-// 404 handler
+// 404 Handler
 app.use((req, res) => {
-  res.status(404).json({ error: 'Not found' });
+  res.status(404).json({ error: 'Not Found' });
 });
 
-// Error handler
+// Error Handler
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({ error: 'Internal server error' });
+  console.error('Server Error:', err);
+  res.status(500).json({ 
+    error: 'Internal Server Error',
+    message: err.message
+  });
 });
 
 module.exports = app;
